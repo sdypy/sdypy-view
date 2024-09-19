@@ -7,6 +7,136 @@ from PyQt5.QtCore import QTimer
 from typing import Union
 import warnings
 
+def prepare_animation_displacements(data, n_nodes=None, n_frames=None):
+    """
+    Prepare the input data for the animation.
+
+    Parameters
+    ----------
+    data : ndarray
+        The input data array. It can have the following shapes:
+        - (n_nodes, 3, n_frames)
+        - (n_nodes*3, n_frames)
+        - (n_nodes, 3) - a varying sine wave is applied to get the animation.
+        - (n_nodes*3) - a varying sine wave is applied to get the animation.
+        - (n_nodes*<int between 3 and 6>, n_frames) - just the first 3 directions are taken (x, y, and z).
+        - (n_nodes*<int between 3 and 6>) - just the first 3 directions are taken (x, y, and z) and the sine wave is applied.
+    n_nodes : int, optional
+        The number of nodes in the mesh. Required if `data` is 1D or 2D and the shape does not provide enough information.
+    n_frames : int, optional
+        The number of frames for the animation. If not provided, it is inferred from the input data or set to 100.
+
+    Returns
+    -------
+    ndarray
+        The prepared data array with shape (n_nodes, 3, n_frames).
+
+    Raises
+    ------
+    ValueError
+        If the input data shape is not recognized or if the provided `n_nodes` or `n_frames` do not match the data dimensions.
+
+    Notes
+    -----
+    If `n_frames` is not provided and cannot be inferred from the input data, it defaults to 100.
+    """
+    default_n_frames = 100
+
+    if data.ndim == 3:
+        if n_nodes is not None and data.shape[0] != n_nodes:
+            raise ValueError("The number of nodes in the data should match the number of nodes in the mesh.")
+        if n_frames is not None and data.shape[2] != n_frames:
+            raise ValueError("The number of frames in the data should match the number of frames provided.")
+        return data
+
+    if data.ndim == 2:
+        if data.shape[1] in range(3, 7):
+            # data is of shape (n_nodes, n_dof_per_node)
+            pass
+        elif n_nodes is None:
+            raise ValueError("The number of nodes should be provided when `data` is 2D and the second axis is not in size 3, 4, 5 or 6.")
+        elif data.shape[0] // n_nodes in range(3, 7):
+            # data is of shape (n_nodes*n_dof_per_node, n_frames)
+            data = data.reshape(n_nodes, -1, data.shape[1])[:, :3, :]
+            return data
+        else:
+            raise ValueError("The data shape is not recognized.")
+        
+    elif data.ndim == 1:
+        if n_nodes is None:
+            raise ValueError("The number of nodes should be provided when `data` is 1D.")
+        
+        if data.shape[0] // n_nodes in range(3, 7):
+            # data is of shape (n_nodes*n_dof_per_node)
+            data = data.reshape(n_nodes, -1)[:, :3]
+        else:
+            raise ValueError("The data shape is not recognized. When `data` is 1D, the size should be `n_nodes * n_dof`, where `n_dof` must be 3, 4, 5 or 6.")
+
+    if data.ndim == 2: # if the data is of shape (n_nodes, n_dof_per_node), the frames are applied to the last dimension
+        if n_frames is None:
+            n_frames = default_n_frames
+        data = np.cos(np.linspace(0, 2*np.pi, n_frames)[None, None, :] -  np.angle(data[:, :, None])) * np.abs(data[:, :, None])
+    
+    return data
+
+def prepare_animation_scalars(data, n_nodes=None, n_frames=None):
+    """
+    Prepare the input scalar data for the animation.
+
+    Parameters
+    ----------
+    data : ndarray
+        The input data array. It can have the following shapes:
+        - (n_nodes) - a varying sine wave is applied to get the animation.
+        - (n_nodes, n_frames)
+    n_nodes : int, optional
+        The number of nodes in the mesh. Required if `data` is 1D.
+    n_frames : int, optional
+        The number of frames for the animation. If not provided, it is inferred from the input data or set to 100.
+
+    Returns
+    -------
+    ndarray
+        The prepared data array with shape (n_nodes, n_frames).
+
+    Raises
+    ------
+    ValueError
+        If the input data shape is not recognized or if the provided `n_nodes` or `n_frames` do not match the data dimensions.
+
+    Notes
+    -----
+    If `n_frames` is not provided and cannot be inferred from the input data, it defaults to 100.
+    """
+    default_n_frames = 100
+
+    if data.ndim == 1:
+        if n_nodes is None:
+            raise ValueError("The number of nodes should be provided when `data` is 1D.")
+        
+        if data.shape[0] == n_nodes:
+            # data is of shape (n_nodes)
+            pass
+        else:
+            data = data.reshape(n_nodes, -1)
+
+            if n_frames is not None and data.shape[1] != n_frames:
+                raise ValueError("The number of frames in the data should match the number of frames provided.")
+        
+    elif data.ndim == 2:
+        if n_nodes is not None and data.shape[0] != n_nodes:
+            raise ValueError("The number of nodes in the data should match the number of nodes in the mesh.")
+        if n_frames is not None and data.shape[1] != n_frames:
+            raise ValueError("The number of frames in the data should match the number of frames provided.")
+    
+    if data.ndim == 1:
+        if n_frames is None:
+            n_frames = default_n_frames
+
+        data = np.cos(np.linspace(0, 2*np.pi, n_frames)[None, :]) * data[:, None]
+    
+    return data
+
 def create_fem_mesh(nodes, elements):
     """Create a PyVista mesh from nodes and elements.
     
@@ -74,10 +204,15 @@ class Plotter3D(BackgroundPlotter, BasePlotter):
         mesh = create_fem_mesh(nodes, elements)
         self.mesh_dict[id(mesh)] = mesh
 
+        if type(scalar) is np.ndarray:
+            scalar = prepare_animation_scalars(scalar, n_nodes=nodes.shape[0], n_frames=n_frames)
+
         if animate is not None:
-            displacements = self.get_animation_displacements(nodes, animate, n_frames)
+            displacements = prepare_animation_displacements(animate, n_nodes=nodes.shape[0], n_frames=n_frames)
+
+            mesh.points = mesh.points + displacements[:, :, 0]
             
-            if scalar == 'norm':
+            if type(scalar) is str and scalar == 'norm':
                 scalar = np.linalg.norm(displacements, axis=1)
 
             # if scalar_name is already in animation_data, add different scalar_name
@@ -94,12 +229,10 @@ class Plotter3D(BackgroundPlotter, BasePlotter):
                 "scalar": scalar,
                 "scalar_name": scalar_name,
             })
-
-            scalar_0 = scalar[:, 0] if scalar is not None else None
             
 
         if scalar is not None:
-            mesh.point_data[scalar_name] = scalar_0
+            mesh.point_data[scalar_name] = scalar[:, 0] # TODO: not sure if this works
             actor = self.add_mesh(mesh, show_edges=True, scalars=scalar_name, cmap=cmap, edge_color=edge_color, opacity=opacity)
             actor.mapper.scalar_range = (np.min(scalar), np.max(scalar)) # Set the scalar range
 
@@ -192,13 +325,28 @@ class Plotter3D(BackgroundPlotter, BasePlotter):
         interval : int, optional
             The interval between frames in milliseconds. Default is 100.
         """
-        self.timer = QTimer()
-        self.timer.timeout.connect(self._update_meshes)
+        if not hasattr(self, "timer"):
+            self.timer = QTimer()
+            self.timer.timeout.connect(self._update_meshes)
+
         self.timer.start(interval)
+        
         if blocking:
             self.app.exec_()
 
-        # self.add_callback(self._update_meshes, interval=interval)
+    def pause_animation(self):
+        """Pause the animation."""
+        self.timer.stop()
+
+    def add_animation_controls(self):
+        """Add a checkbox that starts and stops the animation."""
+        def animation_callback(value):
+            if value:
+                self.start_animation(10, blocking=False)
+            else:
+                self.pause_animation()
+
+        self.add_checkbox_button_widget(animation_callback, value=False)
 
     def _update_meshes(self):
         for anim_dict in self.animation_data:
@@ -350,7 +498,7 @@ class Plotter3D(BackgroundPlotter, BasePlotter):
 
         self.enable_point_picking(callback_function_point)
     
-    def show(self, show_grid=False, show_axes=False):
+    def show(self, show_grid=False, show_axes=False, bounding_box=False):
         """Show the plotter.
         
         Parameters
@@ -377,5 +525,11 @@ class Plotter3D(BackgroundPlotter, BasePlotter):
                 self.show_axes()
         except:
             warnings.warn("Failed to show axes. If you use animation, the `show` method should be called before `start_animation`, or non-blocking `start_animation` should be used.")
+        
+        try:
+            if bounding_box:
+                self.add_bounding_box()
+        except:
+            warnings.warn("Failed to add bounding box")
 
         super().show()
