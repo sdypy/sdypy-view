@@ -4,7 +4,6 @@ from pyvistaqt import BackgroundPlotter
 from pyvista import BasePlotter
 from PyQt5.QtCore import QTimer
 
-from typing import Union
 import warnings
 
 def prepare_animation_displacements(data, n_nodes=None, n_frames=None):
@@ -198,6 +197,7 @@ class Plotter3D(BackgroundPlotter, BasePlotter):
             The displacements or mode shape to be animated. Shape (n_points, 3, n_frames) or
             (n_points, 3) for mode shape. The points and directions can also be flattened to (n_points*3, n_frames).
             If there are more than 3 DOFs per node, only the first 3 are considered.
+            To start the animation, call the ``start_animation`` method.
         n_frames : int
             The number of frames in a single period of the animation.
         """
@@ -232,7 +232,7 @@ class Plotter3D(BackgroundPlotter, BasePlotter):
             
 
         if scalar is not None:
-            mesh.point_data[scalar_name] = scalar[:, 0] # TODO: not sure if this works
+            mesh.point_data[scalar_name] = scalar[:, 0]
             actor = self.add_mesh(mesh, show_edges=True, scalars=scalar_name, cmap=cmap, edge_color=edge_color, opacity=opacity)
             actor.mapper.scalar_range = (np.min(scalar), np.max(scalar)) # Set the scalar range
 
@@ -242,39 +242,6 @@ class Plotter3D(BackgroundPlotter, BasePlotter):
         self.mesh_actor_dict[id(mesh)] = actor
 
         return mesh
-    
-    def get_animation_displacements(self, points, animate, n_frames):
-        """Get the displacements for animation.
-        
-        Parameters
-        ----------
-        points : np.ndarray
-            The nodal coordinates of the mesh. Shape (n_nodes, 3).
-        animate : np.ndarray
-            The displacements or mode shape to be animated. Shape (n_points, 3, n_frames) or
-            (n_points, 3) for mode shape. The points and directions can also be flattened to (n_points*3, n_frames).
-            If there are more than 3 DOFs per node, only the first 3 are considered.
-        n_frames : int
-            The number of frames in a single period of the animation.
-        """
-        if animate.shape[-1] == n_frames: # animate is already a displacement array
-            if animate.ndim == 2 and animate.shape[0] == points.shape[0] * 3:
-                displacements = animate.reshape(-1, points.shape[0], n_frames).transpose(1, 0, 2)
-            elif animate.ndim == 3 and animate.shape[0] == points.shape[0]:
-                displacements = animate[:, :3, :] # in case there are more than 3 DOFs per node, take the first 3
-            else:
-                raise ValueError("Invalid animate array shape.")
-        elif animate.ndim in [1, 2]: # animate is a mode shape
-            if animate.ndim == 1:
-                mode_shape = animate.reshape(points.shape[0], -1)[:, :3]
-            else:
-                mode_shape = animate[:, :3]
-            
-            displacements = np.sin(np.linspace(0, 2*np.pi, n_frames)[None, None, :] -  np.angle(mode_shape[:, :, None])) * np.abs(mode_shape[:, :, None])
-        else:
-            raise ValueError("Invalid animate array shape.")
-        
-        return displacements
 
     def closeEvent(self, evt):
         """Override the close event to stop the q_timer if it exists.
@@ -286,7 +253,7 @@ class Plotter3D(BackgroundPlotter, BasePlotter):
 
         return super().closeEvent(evt)
 
-    def add_fem_mode_shape(self, nodes, elements, mode_shape, cmap="viridis", edge_color='black', opacity=1):
+    def add_fem_mode_shape(self, nodes, elements, mode_shape, cmap="viridis", edge_color='black', opacity=1, animate=False):
         """Add a mode shape to the plotter.
         
         This function uses the ``add_fem_mesh`` method to plot the mode shape. The nodes are moved according to the
@@ -308,16 +275,21 @@ class Plotter3D(BackgroundPlotter, BasePlotter):
             The color of the mesh edges.
         opacity : float, optional
             The opacity of the mesh.
+        animate : bool, optional
+            Whether to animate the mode shape. Default is False.
         """
         if mode_shape.ndim == 1:
             n_dof_per_node = mode_shape.shape[0] // nodes.shape[0]
             mode_shape = mode_shape.reshape(-1, n_dof_per_node)[:, :3]
         
-        nodes = nodes + mode_shape
-        mesh = self.add_fem_mesh(nodes, elements, scalar=mode_shape, scalar_name="mode_shape", cmap=cmap, edge_color=edge_color, opacity=opacity)
+        if animate:
+            mesh = self.add_fem_mesh(nodes, elements, scalar='norm', scalar_name="mode_shape", cmap=cmap, edge_color=edge_color, opacity=opacity, animate=mode_shape)
+        else:
+            nodes = nodes + mode_shape
+            mesh = self.add_fem_mesh(nodes, elements, scalar=mode_shape, scalar_name="mode_shape", cmap=cmap, edge_color=edge_color, opacity=opacity)
         return mesh
 
-    def start_animation(self, interval=10, blocking=True):
+    def start_animation(self, interval=10, blocking=False):
         """Start the animation.
         
         Parameters
@@ -346,7 +318,7 @@ class Plotter3D(BackgroundPlotter, BasePlotter):
             else:
                 self.pause_animation()
 
-        self.add_checkbox_button_widget(animation_callback, value=False)
+        self.add_checkbox_button_widget(animation_callback, value=hasattr(self, "timer"))
 
     def _update_meshes(self):
         for anim_dict in self.animation_data:
