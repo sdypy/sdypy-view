@@ -78,9 +78,9 @@ def prepare_animation_displacements(data, n_nodes=None, n_frames=None):
     
     return data
 
-def prepare_animation_scalars(data, n_nodes=None, n_frames=None):
+def prepare_animation_field(data, n_nodes=None, n_frames=None):
     """
-    Prepare the input scalar data for the animation.
+    Prepare the input field data for the animation.
 
     Parameters
     ----------
@@ -167,8 +167,8 @@ class Plotter3D(BackgroundPlotter, BasePlotter):
     def add_fem_mesh(self, 
                      nodes, 
                      elements, 
-                     scalar=None, 
-                     scalar_name="scalar", 
+                     field=None, 
+                     field_name="field", 
                      cmap="viridis", 
                      edge_color='black', 
                      opacity=1,
@@ -183,10 +183,10 @@ class Plotter3D(BackgroundPlotter, BasePlotter):
             The nodal coordinates of the mesh. Shape (n_nodes, 3).
         elements : np.ndarray
             The element connectivity of the mesh. Shape (n_elements, n_nodes_per_element).
-        scalar : np.ndarray, optional
-            The scalar values to be plotted. Shape (n_elements,).
-        scalar_name : str, optional
-            The name of the scalar array.
+        field : np.ndarray, optional
+            The field values to be plotted. Shape (n_elements,).
+        field_name : str, optional
+            The name of the field array.
         cmap : str, optional
             The colormap to be used.
         edge_color : str, optional
@@ -204,21 +204,21 @@ class Plotter3D(BackgroundPlotter, BasePlotter):
         mesh = create_fem_mesh(nodes, elements)
         self.mesh_dict[id(mesh)] = mesh
 
-        if type(scalar) is np.ndarray:
-            scalar = prepare_animation_scalars(scalar, n_nodes=nodes.shape[0], n_frames=n_frames)
+        if type(field) is np.ndarray:
+            field = prepare_animation_field(field, n_nodes=nodes.shape[0], n_frames=n_frames)
 
         if animate is not None:
             displacements = prepare_animation_displacements(animate, n_nodes=nodes.shape[0], n_frames=n_frames)
 
             mesh.points = mesh.points + displacements[:, :, 0]
             
-            if type(scalar) is str and scalar == 'norm':
-                scalar = np.linalg.norm(displacements, axis=1)
+            if type(field) is str and field == 'norm':
+                field = np.linalg.norm(displacements, axis=1)
 
-            # if scalar_name is already in animation_data, add different scalar_name
-            scalar_names = [anim_dict["scalar_name"] for anim_dict in self.animation_data]
-            if scalar_name in scalar_names:
-                scalar_name = scalar_name + f"_{len(scalar_names)}"
+            # if field_name is already in animation_data, add different field_name
+            field_names = [anim_dict["field_name"] for anim_dict in self.animation_data]
+            if field_name in field_names:
+                field_name = field_name + f"_{len(field_names)}"
 
             self.animation_data.append({
                 "mesh_id": id(mesh),
@@ -226,15 +226,15 @@ class Plotter3D(BackgroundPlotter, BasePlotter):
                 "n_frames": n_frames,
                 "frame": 0,
                 "initial_points": nodes.copy(),
-                "scalar": scalar,
-                "scalar_name": scalar_name,
+                "field": field,
+                "field_name": field_name,
             })
             
 
-        if scalar is not None:
-            mesh.point_data[scalar_name] = scalar[:, 0]
-            actor = self.add_mesh(mesh, show_edges=True, scalars=scalar_name, cmap=cmap, edge_color=edge_color, opacity=opacity)
-            actor.mapper.scalar_range = (np.min(scalar), np.max(scalar)) # Set the scalar range
+        if field is not None:
+            mesh.point_data[field_name] = field[:, 0]
+            actor = self.add_mesh(mesh, show_edges=True, scalars=field_name, cmap=cmap, edge_color=edge_color, opacity=opacity)
+            actor.mapper.scalar_range = (np.min(field), np.max(field)) # Set the field range
 
         else:
             actor = self.add_mesh(mesh, show_edges=True, edge_color=edge_color, opacity=opacity)
@@ -328,7 +328,7 @@ class Plotter3D(BackgroundPlotter, BasePlotter):
             frame = anim_dict["frame"]
             initial_points = anim_dict["initial_points"]
             mesh = self.mesh_dict[anim_dict["mesh_id"]]
-            scalar = anim_dict["scalar"]
+            field = anim_dict["field"]
 
             n_frames = displacements.shape[0]
             if frame >= n_frames or frame > displacements.shape[-1]-1:  # Loop the animation if desired, or stop
@@ -337,10 +337,10 @@ class Plotter3D(BackgroundPlotter, BasePlotter):
             # Update the mesh points with the current frame's data
             mesh.points = initial_points + displacements[:, :, frame]
 
-            # update the scalar if provided
-            if scalar is not None:
-                scalar_name = anim_dict['scalar_name']
-                mesh[scalar_name][:] = scalar[:, frame]
+            # update the field if provided
+            if field is not None:
+                field_name = anim_dict['field_name']
+                mesh[field_name][:] = field[:, frame]
             
             self.render()  # Render the updated mesh
             
@@ -348,7 +348,7 @@ class Plotter3D(BackgroundPlotter, BasePlotter):
 
             anim_dict["frame"] = frame
 
-    def add_points(self, points, color='red', point_size=5.0, render_points_as_spheres=False, label="", animate=None, n_frames=100, scalar=None, scalar_name="scalar", cmap="viridis", opacity=1):
+    def add_points(self, points, color='red', point_size=5.0, render_points_as_spheres=False, label="", animate=None, n_frames=100, field=None, field_name="field", cmap="viridis", opacity=1):
         """Add points to the plotter.
         
         Parameters
@@ -371,8 +371,8 @@ class Plotter3D(BackgroundPlotter, BasePlotter):
         mesh = pv.PolyData(points)
         self.mesh_dict[id(mesh)] = mesh
 
-        if type(scalar) is np.ndarray:
-            scalar = prepare_animation_scalars(scalar, n_nodes=points.shape[0], n_frames=n_frames)
+        if type(field) is np.ndarray:
+            field = prepare_animation_field(field, n_nodes=points.shape[0], n_frames=n_frames)
 
         if render_points_as_spheres:
             mesh = mesh.glyph(scale=False, geom=pv.Sphere(radius=point_size/1000))
@@ -381,13 +381,13 @@ class Plotter3D(BackgroundPlotter, BasePlotter):
         if animate is not None:
             displacements = prepare_animation_displacements(animate, n_nodes=points.shape[0], n_frames=n_frames)
             
-            if scalar == 'norm':
-                scalar = np.linalg.norm(displacements, axis=1)
+            if field == 'norm':
+                field = np.linalg.norm(displacements, axis=1)
 
-            # if scalar_name is already in animation_data, add different scalar_name
-            scalar_names = [anim_dict["scalar_name"] for anim_dict in self.animation_data]
-            if scalar_name in scalar_names:
-                scalar_name = scalar_name + f"_{len(scalar_names)}"
+            # if field_name is already in animation_data, add different field_name
+            field_names = [anim_dict["field_name"] for anim_dict in self.animation_data]
+            if field_name in field_names:
+                field_name = field_name + f"_{len(field_names)}"
 
             self.animation_data.append({
                 "mesh_id": id(mesh),
@@ -395,17 +395,17 @@ class Plotter3D(BackgroundPlotter, BasePlotter):
                 "n_frames": n_frames,
                 "frame": 0,
                 "initial_points": points.copy(),
-                "scalar": scalar,
-                "scalar_name": scalar_name,
+                "field": field,
+                "field_name": field_name,
             })
 
-            scalar_0 = scalar[:, 0] if scalar is not None else None
+            field_0 = field[:, 0] if field is not None else None
             
 
-        if scalar is not None:
-            mesh.point_data[scalar_name] = scalar_0
-            actor = self.add_mesh(mesh, show_edges=True, scalars=scalar_name, cmap=cmap, opacity=opacity)
-            actor.mapper.scalar_range = (np.min(scalar), np.max(scalar)) # Set the scalar range
+        if field is not None:
+            mesh.point_data[field_name] = field_0
+            actor = self.add_mesh(mesh, show_edges=True, scalars=field_name, cmap=cmap, opacity=opacity)
+            actor.mapper.scalar_range = (np.min(field), np.max(field)) # Set the field range
 
         else:
             # actor = self.add_mesh(mesh, show_edges=True, edge_color=edge_color, opacity=opacity)
