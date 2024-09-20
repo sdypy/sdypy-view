@@ -164,6 +164,7 @@ class Plotter3D(BackgroundPlotter, BasePlotter):
         self.recording_gif = False
         self.legend_required = False
         self.animation_data = []
+        self.animation_started = False
         self.mesh_dict = {}
         self.mesh_actor_dict = {}
         super().__init__(*args, **kwargs)
@@ -333,6 +334,7 @@ class Plotter3D(BackgroundPlotter, BasePlotter):
             self.timer.timeout.connect(self._update_meshes)
 
         self.timer.start(interval)
+        self.animation_started = True
         
         if blocking:
             self.app.exec_()
@@ -340,24 +342,43 @@ class Plotter3D(BackgroundPlotter, BasePlotter):
     def pause_animation(self):
         """Pause the animation."""
         self.timer.stop()
+        self.animation_started = False
 
-    def add_animation_controls(self, interval=10, blocking=False):
+    def add_animation_controls(self, mode='button', interval=10, blocking=False, hotkey="space"):
         """Add a checkbox that starts and stops the animation.
         
         Parameters
         ----------
+        mode : str, optional
+            The mode of the animation controls. Can be 'button' or "hotkey". 
+            If "button", a button is added to the plotter that toggles the animation.
+            If "hotkey", a hotkey is used to toggle the animation. Default is 'button'.
         interval : int, optional
             The interval between frames in milliseconds. Default is 100.
         blocking : bool, optional
             Whether the animation should be blocking. Default is False.
+        hotkey : str, optional
+            The hotkey to be used if mode is "hotkey". Default is "space".
         """
         self.interval = interval
         self.blocking = blocking
-        self.add_checkbox_button_widget(self.animation_callback, value=hasattr(self, "timer"))
+        if mode == 'button':
+            self.add_checkbox_button_widget(self.animation_callback, value=hasattr(self, "timer"))
+        elif mode == 'hotkey':
+            self.add_key_event(hotkey, lambda: self.animation_callback(True))
     
     def animation_callback(self, value):
-        """The callback function for the animation checkbox."""
-        if value:
+        """The callback function that toggles the animation.
+
+        Is used by the checkbox button widget or the key event.
+        
+        Parameters
+        ----------
+        value : bool
+            The value of the checkbox. This doesn't have any effect, but the 
+            value is expected when the checkbox is clicked.
+        """
+        if not self.animation_started:
             self.start_animation(self.interval, blocking=self.blocking)
         else:
             self.pause_animation()
@@ -374,7 +395,7 @@ class Plotter3D(BackgroundPlotter, BasePlotter):
 
             n_frames = displacements.shape[0]
             if frame >= n_frames or frame > displacements.shape[-1]-1:  # Loop the animation if desired, or stop
-                if self.recording_gif is not None:
+                if self.recording_gif:
                     # close the plotter and gif
                     self.close()
                     return False
@@ -395,7 +416,7 @@ class Plotter3D(BackgroundPlotter, BasePlotter):
 
             anim_dict["frame"] = frame
         
-        if self.recording_gif is not None:
+        if self.recording_gif:
             self.write_frame()
 
     def add_points(self, points, color='red', point_size=5.0, render_points_as_spheres=False, label="", animate=None, n_frames=100, field=None, field_name="field", cmap="viridis", opacity=1):
