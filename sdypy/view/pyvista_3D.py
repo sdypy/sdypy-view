@@ -160,11 +160,37 @@ def create_fem_mesh(nodes, elements):
 class Plotter3D(BackgroundPlotter, BasePlotter):
     """A PyVista background plotter with some additional functionality."""
     def __init__(self, *args, **kwargs):
+        
+        self.recording_gif = False
         self.legend_required = False
         self.animation_data = []
         self.mesh_dict = {}
         self.mesh_actor_dict = {}
         super().__init__(*args, **kwargs)
+
+    def gif_recorder(self, gif_file: str, loop: int = 0, fps: int = 30, optimize: bool = True):
+        """Open the GIF recorder from the pyVista Plotter.
+        
+        This does not yet start the recording.
+        
+        Requires the ``imageio`` package to be installed.
+
+        A GIF is created according to https://tutorial.pyvista.org/tutorial/03_figures/d_gif.html
+
+        Parameters
+        ----------
+        gif_file : str
+            The file path to save the GIF, must end in '.gif'.
+        loop : int, optional
+            The number of loops for the GIF. Default is 0, which means infinite loops.
+        fps : int, optional
+            The frames per second of the GIF. Default is 30.
+        optimize : bool, optional
+            Optimize the GIF by only saving the difference between frames. This
+            is used in the ``subrectangles`` argument of the pyVista ``open_gif`` method.
+        """
+        self.recording_gif = True
+        self.open_gif(gif_file, loop=loop, fps=fps, palettesize=optimize)
 
     def add_fem_mesh(self, 
                      nodes, 
@@ -299,6 +325,8 @@ class Plotter3D(BackgroundPlotter, BasePlotter):
         ----------
         interval : int, optional
             The interval between frames in milliseconds. Default is 100.
+        blocking : bool, optional
+            Whether the animation should be blocking. Default
         """
         if not hasattr(self, "timer"):
             self.timer = QTimer()
@@ -313,15 +341,26 @@ class Plotter3D(BackgroundPlotter, BasePlotter):
         """Pause the animation."""
         self.timer.stop()
 
-    def add_animation_controls(self):
-        """Add a checkbox that starts and stops the animation."""
-        def animation_callback(value):
-            if value:
-                self.start_animation(10, blocking=False)
-            else:
-                self.pause_animation()
-
-        self.add_checkbox_button_widget(animation_callback, value=hasattr(self, "timer"))
+    def add_animation_controls(self, interval=10, blocking=False):
+        """Add a checkbox that starts and stops the animation.
+        
+        Parameters
+        ----------
+        interval : int, optional
+            The interval between frames in milliseconds. Default is 100.
+        blocking : bool, optional
+            Whether the animation should be blocking. Default is False.
+        """
+        self.interval = interval
+        self.blocking = blocking
+        self.add_checkbox_button_widget(self.animation_callback, value=hasattr(self, "timer"))
+    
+    def animation_callback(self, value):
+        """The callback function for the animation checkbox."""
+        if value:
+            self.start_animation(self.interval, blocking=self.blocking)
+        else:
+            self.pause_animation()
 
     def _update_meshes(self):
         for anim_dict in self.animation_data:
@@ -335,6 +374,11 @@ class Plotter3D(BackgroundPlotter, BasePlotter):
 
             n_frames = displacements.shape[0]
             if frame >= n_frames or frame > displacements.shape[-1]-1:  # Loop the animation if desired, or stop
+                if self.recording_gif is not None:
+                    # close the plotter and gif
+                    self.close()
+                    return False
+
                 frame = 0
 
             # Update the mesh points with the current frame's data
@@ -350,6 +394,9 @@ class Plotter3D(BackgroundPlotter, BasePlotter):
             frame += 1  # Move to the next frame
 
             anim_dict["frame"] = frame
+        
+        if self.recording_gif is not None:
+            self.write_frame()
 
     def add_points(self, points, color='red', point_size=5.0, render_points_as_spheres=False, label="", animate=None, n_frames=100, field=None, field_name="field", cmap="viridis", opacity=1):
         """Add points to the plotter.

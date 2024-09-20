@@ -81,3 +81,31 @@ Here is an example of animating a mode shape:
     plotter.add_animation_controls() # Optional, adds a button to start/stop the animation
     
     plotter.show()
+
+Recording a GIF
+---------------
+
+To record a GIF, the ``gif_recorder`` method must be called. Example:
+
+.. code-block:: python
+
+    import sdypy as sd
+
+    nodes = ... # Finite element nodes (n_nodes, 3)
+    elements ... # Finite elements (n_elements, n_nodes_per_element)
+    mode_shape = ... # Mode shape (n_nodes, 3)
+
+    plotter = sd.view.Plotter3D(nodes, elements)
+    
+    plotter.gif_recorder("mode_shape.gif") # MUST BE CALLED BEFORE THE ANIMATION STARTS
+
+    plotter.add_fem_mesh(nodes, elements, animate=mode_shape, field="norm")
+
+    plotter.start_animation(interval=10) # Required for animation. Interval is the time 1 frame is shown in ms
+    
+    plotter.show()
+
+The recording will last for 1 iteration of the animation. It will start recording when the animation starts.
+
+To first adjust the view of the object in the plotter, use the ``.add_animation_controls()`` instead of ``.start_animation()``. This will
+allow you to first manually adjust the view and then start the animation. At the start of the animation, the recording will start.
