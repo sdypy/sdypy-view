@@ -77,15 +77,14 @@ Here is an example of animating a mode shape:
     plotter = sd.view.Plotter3D(nodes, elements)
     plotter.add_fem_mesh(nodes, elements, animate=mode_shape, field="norm")
 
-    plotter.start_animation(interval=10) # Required for animation. Interval is the time 1 frame is shown in ms
-    plotter.add_animation_controls() # Optional, adds a button to start/stop the animation
-    
+    plotter.configure_animation(interval=20) # To adjust the interval and camera position
+    plotter.start_animation() # Optional. To immediately start the animation. Otherwise, the controls are available in the plotter.
     plotter.show()
 
 Recording a GIF
 ---------------
 
-To record a GIF, the ``gif_recorder`` method must be called. Example:
+To record a GIF, the ``configure_gif_recorder`` method must be called. Example:
 
 .. code-block:: python
 
@@ -101,11 +100,36 @@ To record a GIF, the ``gif_recorder`` method must be called. Example:
 
     plotter.add_fem_mesh(nodes, elements, animate=mode_shape, field="norm")
 
-    plotter.start_animation(interval=10) # Required for animation. Interval is the time 1 frame is shown in ms
+    plotter.configure_gif_recorder('mode_shape.gif', fps=30) # Configure the GIF recorder
+    # The recording can be started from the plotter or by calling plotter.start_animation()
     
     plotter.show()
 
 The recording will last for 1 iteration of the animation. It will start recording when the animation starts.
 
-To first adjust the view of the object in the plotter, use the ``.add_animation_controls()`` instead of ``.start_animation()``. This will
-allow you to first manually adjust the view and then start the animation. At the start of the animation, the recording will start.
+Adding custom toolbar buttons
+-----------------------------
+
+To add custom toolbar commands, use the ``configure_toolbar`` method. Example:
+
+.. code-block:: python
+
+    import sdypy as sd
+
+    nodes = ... # Finite element nodes (n_nodes, 3)
+    elements ... # Finite elements (n_elements, n_nodes_per_element)
+    mode_shape = ... # Mode shape (n_nodes, 3)
+
+    plotter = sd.view.Plotter3D(nodes, elements)
+    plotter.add_fem_mesh(nodes, elements, animate=mode_shape, field="norm")
+
+    def custom_command():
+        print("Custom command")
+
+    toolbar_actions = {
+        "Custom command": custom_command
+    }
+
+    plotter.configure_toolbar(toolbar_actions)
+
+    plotter.show()

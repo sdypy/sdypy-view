@@ -3,6 +3,8 @@ import numpy as np
 from pyvistaqt import BackgroundPlotter
 from pyvista import BasePlotter
 from PyQt5.QtCore import QTimer
+from PyQt5.QtWidgets import  QAction
+import pyperclip
 
 import warnings
 
@@ -169,29 +171,53 @@ class Plotter3D(BackgroundPlotter, BasePlotter):
         self.mesh_actor_dict = {}
         super().__init__(*args, **kwargs)
 
-    def gif_recorder(self, gif_file: str, loop: int = 0, fps: int = 30, optimize: bool = True):
-        """Open the GIF recorder from the pyVista Plotter.
-        
-        This does not yet start the recording.
-        
-        Requires the ``imageio`` package to be installed.
+        # Default settings
+        self.interval = 10
+        self.blocking = False
 
-        A GIF is created according to https://tutorial.pyvista.org/tutorial/03_figures/d_gif.html
+        # Custom toolbar and menu items
+        self.animation_toolbar = self.app_window.addToolBar('SDyPy Toolbar')
+        self.add_toolbar_action(self.animation_toolbar, "Play", self.start_animation, self.app_window)
+        self.add_toolbar_action(self.animation_toolbar, "Pause", self.pause_animation, self.app_window)
+        self.add_toolbar_action(self.animation_toolbar, "Stop", self.reset_animation, self.app_window)
+
+        menu = self.main_menu.addMenu("Camera position")
+        menu.addAction("Print current camera position", lambda: print(self.camera_position))
+        menu.addAction("Copy current camera position", lambda: pyperclip.copy(self.camera_position))
+
+    def configure_toolbar(self, custom_actions=dict()):
+        """Configure the toolbar of the plotter.
+        
+        Custom actions can be added in a form of a dictionary with the action name as the key and the action method as the value.
+        The action (function) should not take any arguments.
+
+        https://github.com/pyvista/pyvista-support/issues/122
+
+        Example:
+
+        .. code-block:: python
+
+            def custom_action():
+                print("Custom action")
+            
+            custom_actions = {"My action": custom_action}
 
         Parameters
         ----------
-        gif_file : str
-            The file path to save the GIF, must end in '.gif'.
-        loop : int, optional
-            The number of loops for the GIF. Default is 0, which means infinite loops.
-        fps : int, optional
-            The frames per second of the GIF. Default is 30.
-        optimize : bool, optional
-            Optimize the GIF by only saving the difference between frames. This
-            is used in the ``subrectangles`` argument of the pyVista ``open_gif`` method.
+        custom_actions : dict
+            A dictionary with the action name as the key and the action method as the value.
         """
-        self.recording_gif = True
-        self.open_gif(gif_file, loop=loop, fps=fps, palettesize=optimize)
+        # Add a toolbar
+        user_toolbar = self.app_window.addToolBar('User Toolbar')
+
+        for key, method in custom_actions.items():
+            self.add_toolbar_action(user_toolbar, key, method, self.app_window)
+
+    def add_toolbar_action(self, toolbar, key, method, main_window):
+        action = QAction(key, main_window)
+        action.triggered.connect(method)
+        toolbar.addAction(action)
+        return
 
     def add_fem_mesh(self, 
                      nodes, 
@@ -319,7 +345,7 @@ class Plotter3D(BackgroundPlotter, BasePlotter):
             mesh = self.add_fem_mesh(nodes, elements, scalar=mode_shape, scalar_name="mode_shape", cmap=cmap, edge_color=edge_color, opacity=opacity)
         return mesh
 
-    def start_animation(self, interval=10, blocking=False):
+    def start_animation(self):
         """Start the animation.
         
         Parameters
@@ -329,66 +355,90 @@ class Plotter3D(BackgroundPlotter, BasePlotter):
         blocking : bool, optional
             Whether the animation should be blocking. Default
         """
+        if self.animation_started or not self.animation_data:
+            return
+        
         if not hasattr(self, "timer"):
             self.timer = QTimer()
             self.timer.timeout.connect(self._update_meshes)
 
-        self.timer.start(interval)
+        self.timer.start(self.interval)
         self.animation_started = True
         
-        if blocking:
+        if self.blocking:
             self.app.exec_()
 
     def pause_animation(self):
         """Pause the animation."""
+        if not self.animation_started:
+            return
+        
         self.timer.stop()
         self.animation_started = False
 
-    def add_animation_controls(self, mode='button', interval=10, blocking=False, hotkey="space"):
-        """Add a checkbox that starts and stops the animation.
+    def reset_animation(self):
+        """Reset the frames to 0 and update the meshes."""
+        self.pause_animation()
+
+        self._update_meshes(frame=0) # update the meshes to the initial frame
+
+    def configure_animation(self, interval=10, camera_position=None, blocking=False):
+        """Configure the animation settings.
         
         Parameters
         ----------
-        mode : str, optional
-            The mode of the animation controls. Can be 'button' or "hotkey". 
-            If "button", a button is added to the plotter that toggles the animation.
-            If "hotkey", a hotkey is used to toggle the animation. Default is 'button'.
         interval : int, optional
             The interval between frames in milliseconds. Default is 100.
+        camera_position : str, optional
+            The camera position to be used for the animation. If not provided, the current camera position is used.
         blocking : bool, optional
             Whether the animation should be blocking. Default is False.
-        hotkey : str, optional
-            The hotkey to be used if mode is "hotkey". Default is "space".
         """
+        if camera_position is not None:
+            self.camera_position = camera_position
+
         self.interval = interval
         self.blocking = blocking
-        if mode == 'button':
-            self.add_checkbox_button_widget(self.animation_callback, value=hasattr(self, "timer"))
-        elif mode == 'hotkey':
-            self.add_key_event(hotkey, lambda: self.animation_callback(True))
-    
-    def animation_callback(self, value):
-        """The callback function that toggles the animation.
 
-        Is used by the checkbox button widget or the key event.
+    def configure_gif_recorder(self, gif_file: str, loop: int = 0, fps: int = 30, optimize: bool = True):
+        """Open the GIF recorder from the pyVista Plotter.
+        
+        This does not yet start the recording.
+        
+        Requires the ``imageio`` package to be installed.
+
+        A GIF is created according to https://tutorial.pyvista.org/tutorial/03_figures/d_gif.html
+
+        Parameters
+        ----------
+        gif_file : str
+            The file path to save the GIF, must end in '.gif'.
+        loop : int, optional
+            The number of loops for the GIF. Default is 0, which means infinite loops.
+        fps : int, optional
+            The frames per second of the GIF. Default is 30.
+        optimize : bool, optional
+            Optimize the GIF by only saving the difference between frames. This
+            is used in the ``subrectangles`` argument of the pyVista ``open_gif`` method.
+        """
+        self.add_toolbar_action(self.animation_toolbar, "Record", self.start_animation, self.app_window)
+        self.recording_gif = True
+        self.open_gif(gif_file, loop=loop, fps=fps, palettesize=optimize)
+
+    def _update_meshes(self, frame=None):
+        """Update the meshes for the animation.
         
         Parameters
         ----------
-        value : bool
-            The value of the checkbox. This doesn't have any effect, but the 
-            value is expected when the checkbox is clicked.
+        frame : int, optional
+            The frame to be updated. If not provided, the frame is taken from the animation data.
         """
-        if not self.animation_started:
-            self.start_animation(self.interval, blocking=self.blocking)
-        else:
-            self.pause_animation()
-
-    def _update_meshes(self):
         for anim_dict in self.animation_data:
-            # self.update_mesh(**anim_dict)
+            if frame is None:
+                frame = anim_dict["frame"]
+            
             displacements = anim_dict["displacements"]
             n_frames = anim_dict["n_frames"]
-            frame = anim_dict["frame"]
             initial_points = anim_dict["initial_points"]
             mesh = self.mesh_dict[anim_dict["mesh_id"]]
             field = anim_dict["field"]
@@ -397,6 +447,7 @@ class Plotter3D(BackgroundPlotter, BasePlotter):
             if frame >= n_frames or frame > displacements.shape[-1]-1:  # Loop the animation if desired, or stop
                 if self.recording_gif:
                     # close the plotter and gif
+                    self.add_text("Saving GIF, please wait...")
                     self.close()
                     return False
 
