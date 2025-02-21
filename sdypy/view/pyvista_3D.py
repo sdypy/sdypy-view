@@ -5,8 +5,49 @@ from pyvista import BasePlotter
 from PyQt5.QtCore import QTimer
 from PyQt5.QtWidgets import  QAction
 import pyperclip
+from PIL import Image
+import io
+import platform
+import subprocess
 
 import warnings
+
+
+def copy_image_to_clipboard(image: Image.Image):
+    """Copy a PIL image to the clipboard on different platforms."""
+    # Save image as PNG in a byte buffer
+    with io.BytesIO() as output:
+        image.save(output, format="PNG")
+        image_bytes = output.getvalue()
+
+    system = platform.system()
+
+    # Windows: Using win32clipboard
+    if system == "Windows":
+        import win32clipboard
+        from io import BytesIO
+        
+        # Convert to DIB format (Device Independent Bitmap)
+        output = BytesIO()
+        image.convert('RGB').save(output, 'BMP')
+        data = output.getvalue()[14:]  # Remove BMP header
+        output.close()
+        
+        # Copy to clipboard
+        win32clipboard.OpenClipboard()
+        win32clipboard.EmptyClipboard()
+        win32clipboard.SetClipboardData(win32clipboard.CF_DIB, data)
+        win32clipboard.CloseClipboard()
+
+    # macOS
+    elif system == "Darwin":
+        process = subprocess.Popen(['osascript', '-e', 'set the clipboard to (read (POSIX file "/dev/stdin") as TIFF picture)'],
+                                stdin=subprocess.PIPE)
+        process.communicate(input=image_bytes)
+
+    # Linux
+    elif system == "Linux":
+        subprocess.run(['xclip', '-selection', 'clipboard', '-t', 'image/png'], input=image_bytes)
 
 def prepare_animation_displacements(data, n_nodes=None, n_frames=None):
     """
@@ -175,8 +216,10 @@ class Plotter3D(BackgroundPlotter, BasePlotter):
         self.interval = 10
         self.blocking = False
 
+        self.app_window.addToolBarBreak() # add a break to the toolbar
         # Custom toolbar and menu items
         self.animation_toolbar = self.app_window.addToolBar('SDyPy Toolbar')
+        self.add_toolbar_action(self.animation_toolbar, "Screenshot to clipboard", self.copy_screenshot_to_clipboard, self.app_window)
         self.add_toolbar_action(self.animation_toolbar, "Play", self.start_animation, self.app_window)
         self.add_toolbar_action(self.animation_toolbar, "Pause", self.pause_animation, self.app_window)
         self.add_toolbar_action(self.animation_toolbar, "Stop", self.reset_animation, self.app_window)
@@ -184,6 +227,22 @@ class Plotter3D(BackgroundPlotter, BasePlotter):
         menu = self.main_menu.addMenu("Camera position")
         menu.addAction("Print current camera position", lambda: print(self.camera_position))
         menu.addAction("Copy current camera position", lambda: pyperclip.copy(self.camera_position))
+
+    def copy_screenshot_to_clipboard(self):
+        """Take a screenshot of the plotter and save it to the clipboard."""
+        try:
+            # Capture the screenshot
+            image_array = self.screenshot(transparent_background=True)
+
+            # Convert to PIL Image
+            image = Image.fromarray(image_array)
+
+            # Copy to clipboard using platform-specific methods
+            copy_image_to_clipboard(image)
+
+            print("Screenshot copied to clipboard!")
+        except Exception as e:
+            print(f"Failed to copy screenshot: {e}")
 
     def configure_toolbar(self, custom_actions=dict()):
         """Configure the toolbar of the plotter.
@@ -208,6 +267,7 @@ class Plotter3D(BackgroundPlotter, BasePlotter):
             A dictionary with the action name as the key and the action method as the value.
         """
         # Add a toolbar
+        self.app_window.addToolBarBreak() # add a break to the toolbar
         user_toolbar = self.app_window.addToolBar('User Toolbar')
 
         for key, method in custom_actions.items():
