@@ -297,15 +297,16 @@ class Plotter3D(BackgroundPlotter, BasePlotter):
         
         self.mesh_actor_dict[id(mesh)] = actor
 
-        return mesh
+        return actor
 
     def closeEvent(self, evt):
-        """Override the close event to stop the q_timer if it exists.
+        """Override the close event to stop the ``timer`` if it exists.
         
         After the QTimer is stopped, the plotter is closed as usual.
         """
-        if hasattr(self, "q_timer"):
-            self.q_timer.stop()
+        if hasattr(self, "timer"):
+            self.timer.stop()
+            self.timer.deleteLater()
 
         return super().closeEvent(evt)
 
@@ -339,11 +340,11 @@ class Plotter3D(BackgroundPlotter, BasePlotter):
             mode_shape = mode_shape.reshape(-1, n_dof_per_node)[:, :3]
         
         if animate:
-            mesh = self.add_fem_mesh(nodes, elements, scalar='norm', scalar_name="mode_shape", cmap=cmap, edge_color=edge_color, opacity=opacity, animate=mode_shape)
+            actor = self.add_fem_mesh(nodes, elements, scalar='norm', scalar_name="mode_shape", cmap=cmap, edge_color=edge_color, opacity=opacity, animate=mode_shape)
         else:
             nodes = nodes + mode_shape
-            mesh = self.add_fem_mesh(nodes, elements, scalar=mode_shape, scalar_name="mode_shape", cmap=cmap, edge_color=edge_color, opacity=opacity)
-        return mesh
+            actor = self.add_fem_mesh(nodes, elements, scalar=mode_shape, scalar_name="mode_shape", cmap=cmap, edge_color=edge_color, opacity=opacity)
+        return actor
 
     def start_animation(self):
         """Start the animation.
@@ -567,7 +568,100 @@ class Plotter3D(BackgroundPlotter, BasePlotter):
         if label:
             self.legend_required = True
 
-        return mesh
+        return actor
+    
+    def add_surface(self, points, color='red', point_size=5.0, render_points_as_spheres=False, label="", animate=None, n_frames=100, field=None, field_name="field", cmap="viridis", opacity=1):
+        """Add surface to the plotter.
+
+        The surface is created by triangulation of the points using the ``delaunay_2d`` method.
+        Because the ``delaunay_2d`` method is used, the points must be approximately coplanar.
+        
+        Parameters
+        ----------
+        points : np.ndarray
+            The coordinates of the points. Shape (n_points, 3) or (3,) for a single point.
+        color : str, optional
+            The color of the points.
+        point_size : float, optional
+            The size of the points.
+        render_points_as_spheres : bool, optional
+            Whether to render the points as spheres. For a large number of points, 
+            rendering as spheres can be slow. Default is False.
+        label : str, optional
+            The label of the points.
+        animate : np.ndarray
+            The displacements to be animated. Shape (n_points, 3, n_frames) or
+            (n_points, 3) for mode shape. The points and directions can also be flattened to (n_points*3, n_frames).
+            If there are more than 3 DOFs per node, only the first 3 are considered.
+            To start the animation, call the ``start_animation`` method.
+        n_frames : int
+            The number of frames in a single period of the animation.
+        field : np.ndarray or string, optional
+            The field values to be plotted. Can be array or "norm" or None. If "norm",
+            the actual values are computed from the ``animate`` argument. Shape (n_points,).
+        field_name : str, optional
+            The name of the field array.
+        cmap : str, optional
+            The colormap to be used.
+        opacity : float, optional
+            The opacity of the points.
+        """
+        if points.ndim == 1:
+            points = points[None, :]
+
+        cloud = pv.PolyData(points)
+        surface = cloud.delaunay_2d()  # Use alpha to limit the triangulation
+        mesh = surface.extract_surface()
+        self.mesh_dict[id(mesh)] = mesh
+
+        if type(field) is np.ndarray:
+            field = prepare_animation_field(field, n_nodes=points.shape[0], n_frames=n_frames)
+
+        if render_points_as_spheres:
+            mesh = mesh.glyph(scale=False, geom=pv.Sphere(radius=point_size/1000))
+
+
+        if animate is not None:
+            displacements = prepare_animation_displacements(animate, n_nodes=points.shape[0], n_frames=n_frames)
+
+            mesh.points = mesh.points + displacements[:, :, 0]
+            
+            if field == 'norm':
+                field = np.linalg.norm(displacements, axis=1)
+
+            # if field_name is already in animation_data, add different field_name
+            field_names = [anim_dict["field_name"] for anim_dict in self.animation_data]
+            if field_name in field_names:
+                field_name = field_name + f"_{len(field_names)}"
+
+            self.animation_data.append({
+                "mesh_id": id(mesh),
+                "displacements": displacements,
+                "n_frames": n_frames,
+                "frame": 0,
+                "initial_points": points.copy(),
+                "field": field,
+                "field_name": field_name,
+            })
+
+            field_0 = field[:, 0] if field is not None else None
+            
+
+        if field is not None:
+            mesh.point_data[field_name] = field_0
+            actor = self.add_mesh(mesh, show_edges=True, scalars=field_name, cmap=cmap, opacity=opacity)
+            actor.mapper.scalar_range = (np.min(field), np.max(field)) # Set the field range
+
+        else:
+            # actor = self.add_mesh(mesh, show_edges=True, edge_color=edge_color, opacity=opacity)
+            actor = self.add_mesh(mesh, color=color, point_size=point_size, label=label, opacity=opacity)
+        
+        self.mesh_actor_dict[id(mesh)] = actor
+
+        if label:
+            self.legend_required = True
+
+        return actor
 
     def add_arrow(self, start, direction, color="black", scale=1, label="", **kwargs):
         """Add an arrow to the plotter.
@@ -599,7 +693,7 @@ class Plotter3D(BackgroundPlotter, BasePlotter):
         if label:
             self.legend_required = True
 
-        return arrow
+        return actor
 
     def add_point_picker(self, callback=None):
         """Enable point picking on the plotter.
