@@ -9,6 +9,7 @@ from PIL import Image
 import io
 import platform
 import subprocess
+import vtk
 
 import warnings
 from pyvista.plotting.picking import PICKED_REPRESENTATION_NAMES
@@ -211,7 +212,7 @@ class Plotter3D(BackgroundPlotter, BasePlotter):
         self.mesh_dict = {}
         self.mesh_actor_dict = {}
         self._accel_widgets = []        # List of widget objects
-        self._accel_widget_data = []   # List of widget data dicts
+        self._placed_accelerometers = {}
         super().__init__(*args, **kwargs)
 
         # Default settings
@@ -219,7 +220,7 @@ class Plotter3D(BackgroundPlotter, BasePlotter):
         self.blocking = False
         self.animate = None
         self.n_frames = 100
-        self.default_accelerometer_size = (0.1, 0.1, 0.05)
+        self.default_accelerometer_size = (1, 1, 0.5)
         self.default_excitation_size = 1
         self.snap_to_closest_node =True
 
@@ -233,9 +234,10 @@ class Plotter3D(BackgroundPlotter, BasePlotter):
         self.add_toolbar_action(self.animation_toolbar, "Stop", self.reset_animation, self.app_window)
         self.add_toolbar_action(self.animation_toolbar, "Record GIF", self.start_recording, self.app_window)
         self.add_toolbar_action(self.animation_toolbar, "Add accelerometer", self.add_accelerometer_widget, self.app_window)
-        self.add_toolbar_action(self.animation_toolbar, "Pick a point", self.add_point_picker, self.app_window)
-        self.add_toolbar_action(self.animation_toolbar, "Print cell type", self.print_cell_type_on_click, self.app_window)
+        self.add_toolbar_action(self.animation_toolbar, "Edit accelerometer", self.edit_accelerometer, self.app_window)
         self.add_toolbar_action(self.animation_toolbar, "Add excitation", self.add_excitation, self.app_window)
+        #self.add_toolbar_action(self.animation_toolbar, "Pick a point", self.add_point_picker, self.app_window)
+        #self.add_toolbar_action(self.animation_toolbar, "Print cell type", self.print_cell_type_on_click, self.app_window)
 
         menu = self.main_menu.addMenu("Camera position")
         menu.addAction("Print current camera position", lambda: print(self.camera_position))
@@ -417,7 +419,6 @@ class Plotter3D(BackgroundPlotter, BasePlotter):
             n_dof_per_node = mode_shape.shape[0] // nodes.shape[0]
             mode_shape = mode_shape.reshape(-1, n_dof_per_node)[:, :3]
 
-       # spremenil scalar v field in scalar_ name v field_name 
         if animate:
             actor = self.add_fem_mesh(nodes, elements, field='norm', field_name="mode_shape", cmap=cmap, edge_color=edge_color, opacity=opacity, animate=mode_shape)
         else:
@@ -445,25 +446,32 @@ class Plotter3D(BackgroundPlotter, BasePlotter):
         self.timer.start(self.interval)
         self.animation_started = True
         
-        self.place_accelerometer_from_widget(animate=self.animate, n_frames=self.n_frames)
         self.start_animation()
 
         # Remove line widgets when animation starts
         if hasattr(self, 'line_widgets'):
             for widget in self.line_widgets:
                 try:
-                    widget.Off()  # Turn off the widget
-                    widget.SetEnabled(False)  # Disable the widget
+                    widget.Off()
+                    widget.SetEnabled(False)
                 except Exception:
                     pass
+
+        # Remove box widgets when animation starts
+        if hasattr(self, "_accel_widgets"):
+            for widget in self._accel_widgets:
+                try:
+                    widget.Off()
+                    widget.SetEnabled(False) 
+                except Exception:
+                    pass
+        # Remove the accelerometer instruction text
+        self.remove_actor("accel_instruction")
     
-        # Odstrani osvetlitev
+        # Remove highlighted actors
         for name in PICKED_REPRESENTATION_NAMES.values():
             self.remove_actor(name)
 
-        if hasattr(self, "_displacement_preview_actor"):
-            self.remove_actor(self._displacement_preview_actor) 
-            del self._displacement_preview_actor
         if self.blocking:
             self.app.exec_()
 
@@ -797,6 +805,7 @@ class Plotter3D(BackgroundPlotter, BasePlotter):
         start,
         direction,
         color="black",
+        opacity=1,
         scale=1,
         label="",
         animate=None,
@@ -855,7 +864,7 @@ class Plotter3D(BackgroundPlotter, BasePlotter):
                 "field_name": None,
             })
 
-        actor = self.add_mesh(arrow, color=color, label=label, **kwargs)
+        actor = self.add_mesh(arrow, color=color, label=label, opacity=opacity, **kwargs)
         self.mesh_actor_dict[id(arrow)] = actor
 
         if label == "Normal vector":
@@ -969,215 +978,299 @@ class Plotter3D(BackgroundPlotter, BasePlotter):
 
         return normal
     
+    def align_widget_to_normal(self, widget, normal, point):
+        """Rotate widget to align with normal at the given point"""
+        normal = np.asarray(normal, dtype=float)
+        normal /= np.linalg.norm(normal)
+        source_axis = np.array([0, 0, 1])
 
-    def align_box_widget_bounds(self, center, size, normal):
+        # Calculate rotation
+        axis = np.cross(source_axis, normal)
+        angle = np.arccos(np.clip(np.dot(source_axis, normal), -1.0, 1.0))
+        axis_norm = np.linalg.norm(axis)
+
+        if axis_norm < 1e-6:
+            if np.dot(source_axis, normal) < 0:
+                axis = np.array([1, 0, 0])
+                angle = np.pi
+
+            else:
+                pass
+
+        transform = vtk.vtkTransform()
+        transform.Translate(*point)
+        transform.RotateWXYZ(np.degrees(angle), *axis)
+        transform.Translate(*[0, 0, self.default_accelerometer_size[2] * 0.5]) # offset
+        widget.SetTransform(transform)
+
+    def calculate_cube_bounds(self, center, size):
         """
-        Returns bounds for a box widget such that its local z-axis is aligned with the given normal.
+        Calculate the bounds of a cube given its center and size.
 
         Parameters
         ----------
         center : array-like
-            The center of the box.
-        size : tuple of float
-            The size of the box (x_length, y_length, z_length).
-        normal : array-like
-            The target normal vector to align the box's z-axis with.
+            The coordinates of the cube's center (x, y, z).
+        size : array-like
+            The size of the cube in (x_length, y_length, z_length).
 
         Returns
         -------
         bounds : list
-            The bounds for the box widget, possibly rotated.
+            The bounds of the cube in the format [xmin, xmax, ymin, ymax, zmin, zmax].
         """
-
         center = np.asarray(center)
         size = np.asarray(size)
-        normal = np.asarray(normal)
-        normal = normal / np.linalg.norm(normal)
+        half_size = size / 2.0
 
-        z_axis = np.array([0, 0, 1])
-
-        axis = np.cross(z_axis, normal)
-        angle = np.arccos(np.clip(np.dot(z_axis, normal), -1.0, 1.0))
-
-        if np.linalg.norm(axis) < 1e-6:
-            if np.dot(z_axis, normal) < 0:
-                rot_matrix = np.array([
-                    [1, 0, 0],
-                    [0, -1, 0],
-                    [0, 0, -1]
-                ])
-            else:
-                rot_matrix = np.eye(3)
-        else:
-            axis = axis / np.linalg.norm(axis)
-            K = np.array([
-                [0, -axis[2], axis[1]],
-                [axis[2], 0, -axis[0]],
-                [-axis[1], axis[0], 0]
-            ])
-            rot_matrix = (
-                np.eye(3) +
-                np.sin(angle) * K +
-                (1 - np.cos(angle)) * (K @ K)
-            )
-
-        dx, dy, dz = size / 2.0
-        corners = np.array([
-            [dx, dy, dz],
-            [dx, dy, -dz],
-            [dx, -dy, dz],
-            [dx, -dy, -dz],
-            [-dx, dy, dz],
-            [-dx, dy, -dz],
-            [-dx, -dy, dz],
-            [-dx, -dy, -dz],
-        ])
-
-        rotated_corners = (rot_matrix @ corners.T).T + center
-
-        xmin, ymin, zmin = rotated_corners.min(axis=0)
-        xmax, ymax, zmax = rotated_corners.max(axis=0)
-        bounds = [xmin, xmax, ymin, ymax, zmin, zmax]
+        bounds = [
+            center[0] - half_size[0], center[0] + half_size[0],
+            center[1] - half_size[1], center[1] + half_size[1],
+            center[2] - half_size[2], center[2] + half_size[2],
+        ]
 
         return bounds
 
-    def add_accelerometer_widget(self, set_handle_size=0.005, cube_size=None, tolerance=0):
+    def add_accelerometer_widget(self, set_handle_size=10, cube_size=None, tolerance=0, input_node=None,
+                                input_normal=None, input_mesh=None):
         """
         Place a cube widget at a picked point, allow user to adjust it, and store its state for animation.
         
         Parameters
         ----------
-        snap_to_closest-node : bool, optional
-            If True, the widget will snap to the closest node of the picked mesh. Default is True.
         set_handle_size : float, optional
-            Size of the widget handles. Default is 0.005.
+            Size of the widget handles. Default is 0.5.
         cube_size : tuple of float, optional
-            Size of the cube widget in (x, y, z) dimensions. Default is (0.1, 0.1, 0.05).
+            Size of the cube widget in (x, y, z) dimensions. Default is the default_accelerometer_size.
         tolerance : float, optional
             Tolerance for picking. Default is 0.
         """
-
+        self.disable_picking()
+        
         if cube_size is None:
             cube_size = self.default_accelerometer_size
         if not hasattr(self, "_accel_widgets"):
             self._accel_widgets = []
-        if not hasattr(self, "_accel_widget_data"):
-            self._accel_widget_data = []
+        self.remove_actor("accel_instruction")
+        self._accel_widget_data_by_id = {}
 
-        def on_pick(picked_point, picker): 
+        # Remove previous widgets if they exist
+        if hasattr(self, "_accel_widgets") and len(self._accel_widgets) > 0:
+            previous_widget = self._accel_widgets[0]
+            previous_widget.Off()
+            previous_widget.SetEnabled(False)
+            self._accel_widgets = []
+
+        def key_press_callback_enter(obj, event):
+            key = obj.GetKeySym().lower()
+            if key == 'return' and hasattr(self, "_accel_widgets") and len(self._accel_widgets) > 0:
+                self.remove_actor("accel_instruction")
+
+                for widget in self._accel_widgets:
+                    try:
+                        widget.Off()
+                        widget.SetEnabled(False) 
+                    except Exception:
+                        pass
+
+                self.place_accelerometer_from_widget(animate=self.animate, n_frames=self.n_frames)
+
+        # When ESC is pressed, exit picking mode
+        def key_press_callback_esc(obj, event):
+            key = obj.GetKeySym().lower()
+            if key == 'escape':
+                self.remove_actor("edit_accel_instruction")
+                self.disable_picking()
+
+        self.iren.add_observer("KeyPressEvent", key_press_callback_enter)
+        self.iren.add_observer("KeyPressEvent", key_press_callback_esc)
+
+        def widget_callback(box, widget):
+            if input_node is not None and input_normal is not None:
+                mesh = input_mesh
+                widget_center = box.center
+                cell_id = mesh.find_closest_cell(widget_center)
+                cell = mesh.extract_cells(cell_id)
+                points = np.asarray(cell.points, dtype=float)
+                node_id = np.argmin(np.linalg.norm(points - widget_center, axis=1))
+                closest_node = points[node_id]
+                if widget_callback.first_pick:
+                    normal_vector = input_normal
+                else:
+                    try:
+                        normal_vector = self.calculate_element_normal([points[0], points[1], points[2]])
+                    except IndexError:
+                        return
+
+            else:
+                widget_center = box.center
+                first_normal = widget_callback.first_normal
+                mesh = widget_callback.mesh
+                first_pick = widget_callback.first_pick
+                cell_id = mesh.find_closest_cell(widget_center)
+                cell = mesh.extract_cells(cell_id)
+                points = np.asarray(cell.points, dtype=float)
+                node_id = np.argmin(np.linalg.norm(points - widget_center, axis=1))
+                closest_node = points[node_id]
+
+                if first_pick:
+                    normal_vector = first_normal
+                else:
+                    try:
+                        normal_vector = self.calculate_element_normal([points[0], points[1], points[2]])
+                    except IndexError:
+                        return
+            # Reset widget position and then apply rotation
+            new_bounds = self.calculate_cube_bounds([0, 0, 0], self.default_accelerometer_size)
+            widget.PlaceWidget(new_bounds)
+            self.align_widget_to_normal(widget, normal_vector, closest_node)
+            handle_prop = widget.GetHandleProperty()
+            handle_prop.SetPointSize(20)  # 20 pixel rendering
+            widget.SetHandleSize(0.004)
+
+            widget_id = id(widget)
+            self._accel_widget_data_by_id[widget_id] ={
+                "center": box.center,
+                "size": cube_size,
+                "normal": normal_vector,
+                "closest_node": closest_node,
+                "mesh": mesh
+            }
+
+        def on_pick(picked_point, picker):
+            self.disable_picking()
             mesh = picker.GetDataSet()
+            
             if mesh is None:
                 print("No mesh found at picked point.")
                 return
-
             cell_id = mesh.find_closest_cell(picked_point)
             if cell_id < 0:
                 print("No cell found at picked point.")
                 return
-
+            
+            widget_callback.mesh = mesh
             cell = mesh.extract_cells(cell_id)
-            points = cell.points
-
-            if points.shape[0] >= 3:
-                normal = self.calculate_element_normal([points[0], points[1], points[2]])
-            else:
+            points = np.asarray(cell.points, dtype=float)
+            
+            if points.shape[0] < 3:
                 print("Cell does not have enough points to calculate normal.")
                 return
-
-            self.disable_picking()
-            if self.snap_to_closest_node:
-                node_id = np.argmin(np.linalg.norm(points - picked_point, axis=1))
-                center = points[node_id]
-            else:
-                center = picked_point
-
-            offset = 0.5 * cube_size[2] * normal
-            cube_center = center + offset
-            bounds = self.align_box_widget_bounds(cube_center, cube_size, normal)
-
-            def widget_callback(box_polydata, widget=None):
-                bounds = box_polydata.bounds
-                center = box_polydata.center
-
-                try:
-                    idx = self._accel_widgets.index(widget)
-                except ValueError:
-                    idx = -1
-
-                data = {
-                    "bounds": bounds,
-                    "center": center,
-                    "polydata": box_polydata.copy(),
-                    "size": (bounds[1]-bounds[0], bounds[3]-bounds[2], bounds[5]-bounds[4]),
-                }
-
-                if 0 <= idx < len(self._accel_widget_data):
-                    self._accel_widget_data[idx] = data
-                else:
-                    self._accel_widget_data.append(data)
-
+            
+            node_id = np.argmin(np.linalg.norm(points - picked_point, axis=1))
+            closest_node = points[node_id]
+            normal_vector = self.calculate_element_normal([points[0], points[1], points[2]])
+            
+            widget_callback.first_normal = normal_vector
+            widget_callback.first_pick = True
+            
             widget = self.add_box_widget(
-                callback=widget_callback,
-                bounds=bounds,
-                rotation_enabled=True,
-                color="red",
-                outline_translation=True,
-                pass_widget=True
+                callback=widget_callback, 
+                pass_widget=True, 
+                color='red', 
+                bounds=self.calculate_cube_bounds(closest_node, cube_size)
             )
-            try:
-                widget.SetHandleSize(set_handle_size)
-            except Exception:
-                pass
+            # Add instruction text
+            self.add_text(
+                "Press Enter to confirm placement",
+                position="upper_left",
+                font_size=16,
+                color="red",
+                name="accel_instruction"
+            )
+            widget_callback.first_pick = False
+            widget.ScalingEnabledOff()
+            self._accel_widgets.append(widget)
+            
+        if input_normal is None and input_node is None:
+            self.enable_surface_point_picking(callback=on_pick, use_picker=True, tolerance=tolerance)
+        else:
+            widget_callback.first_pick = True
+            widget = self.add_box_widget(
+                callback=widget_callback, 
+                pass_widget=True, 
+                color='red', 
+                bounds=self.calculate_cube_bounds(input_node, self.default_accelerometer_size)
+            )
+            widget.ScalingEnabledOff()
             self._accel_widgets.append(widget)
 
-        self.enable_surface_point_picking(callback=on_pick, use_picker=True, tolerance=tolerance)
+            self.add_text(
+                "Press Enter to confirm placement",
+                position="upper_left",
+                font_size=16,
+                color="red",
+                name="accel_instruction"
+            )
+            widget_callback.first_pick = False
+
 
     def place_accelerometer_from_widget(self, animate=None, n_frames=None):
         """
         Place the animated accelerometer at the last widget's position and orientation.
-
-        Parameters
-        ----------
-        animate : ndarray, optional
-            Displacement matrix of shape (1, 3) that defines the direction of animation.
-            If None, uses the default animation settings.
-        n_frames : int, optional
-            Number of animation steps. If None, uses the default number of frames.
         """
-
         if animate is None:
             animate = self.animate
         if n_frames is None:
             n_frames = self.n_frames
 
-        # if not hasattr(self, "_accel_widget_data") or not self._accel_widget_data:
-        #     print("No accelerometer widget placed.")
-        #     return
-
-        # Remove all widgets from the scene
-        if hasattr(self, "_accel_widgets"):
-            for widget in self._accel_widgets:
-                try:
-                    widget.SetEnabled(False)
-                    widget.Off()
-                except Exception:
-                    pass
-            self._accel_widgets = []
-
-        for data in self._accel_widget_data:
+        if hasattr(self, "_accel_widget_data_by_id") and self._accel_widget_data_by_id:
+            data = next(iter(self._accel_widget_data_by_id.values()))
+            
             center = data["center"]
             size = data["size"]
-            self.add_cube(
+            normal = data["normal"]
+            
+            actor = self.add_cube(
                 center=center,
                 size=size,
                 color="red",
                 label="Accelerometer",
                 animate=animate,
                 n_frames=n_frames,
+                normal=normal,
                 center_to_normal=center,
             )
-        self._accel_widget_data = []
+            actor_id = id(actor)
+            self._placed_accelerometers[actor_id] = {
+                "normal": normal,
+                "center": center,
+                "closest_node": data["closest_node"],
+                "mesh": data["mesh"]
+            }
+            self._accel_widget_data_by_id = {}
         
+    def edit_accelerometer(self):
+        self.disable_picking()
+        def on_pick(mesh):
+            self.disable_picking()
+            mesh_id = id(mesh)  # Conversion 
+            actor = self.mesh_actor_dict[mesh_id]
+            actor_id = id(actor)
+
+            label = mesh.field_data.get("label")
+            if label == "Accelerometer":
+                normal = self._placed_accelerometers[actor_id]["normal"]
+                node = self._placed_accelerometers[actor_id]["closest_node"]
+                mesh = self._placed_accelerometers[actor_id]["mesh"]
+                self.remove_actor(actor)
+                self.add_accelerometer_widget(input_normal=normal,
+                                              input_node=node,
+                                              input_mesh=mesh)
+            else:
+                print("Selected mesh is not an accelerometer.")
+
+        # When ESC is pressed, exit edit mode
+        def key_press_callback(obj, event):
+            key = obj.GetKeySym().lower()
+            if key == 'escape':
+                self.remove_actor("edit_accel_instruction")
+                self.disable_picking()
+                
+        self.iren.add_observer("KeyPressEvent", key_press_callback)
+            
+        self.enable_mesh_picking(callback=on_pick, show=False)
+
     def add_cube(
         self,
         center,
@@ -1230,6 +1323,7 @@ class Plotter3D(BackgroundPlotter, BasePlotter):
             y_length=size[1],
             z_length=size[2]
         )
+        cube.field_data["label"] = label # Used in edit accelerometer
         if animate is None:
             animate = self.animate
         if n_frames is None:
@@ -1241,7 +1335,7 @@ class Plotter3D(BackgroundPlotter, BasePlotter):
 
         if animate is not None and animate.ndim == 2:
             displacements = prepare_animation_displacements( 
-                animate, n_nodes=1, n_frames=n_frames   #n_nodes=1 zato ker gledamo samo eno točko
+                animate, n_nodes=1, n_frames=n_frames   #n_nodes=1 because we only follow one point
             )
             cube_displacements = np.tile(displacements[0, :, :], (cube.points.shape[0], 1, 1))
 
@@ -1262,7 +1356,7 @@ class Plotter3D(BackgroundPlotter, BasePlotter):
             self.legend_required = True
 
         return actor
-
+    
     def align_cube_to_normal(self, cube, normal, center):
         """
         Rotates the cube so its local z-axis aligns with the given normal vector,
@@ -1424,15 +1518,18 @@ class Plotter3D(BackgroundPlotter, BasePlotter):
     
     def add_excitation(self, tolerance=0):
         """
-        Add an interactive arrow widget. First click on a surface to place the arrow start point,
-        then use the line widget to adjust the arrow direction and length. The arrow initially
-        points in the normal direction of the clicked surface. Use checkbox to reverse the arrow direction.
-        
-        Parameters
-        ----------
-        tolerance : float, optional
-            Tolerance for surface picking. Default is 0.
+        Add an interactive arrow widget with starting point that always snaps to the closest node.
         """
+        self.disable_picking()
+        if hasattr(self, "_accel_widgets") and len(self._accel_widgets) > 0:
+            previous_widget = self._accel_widgets[0]
+            previous_widget.Off()
+            previous_widget.SetEnabled(False)
+            self._accel_widgets = []
+
+        self.remove_actor("accel_instruction")
+        self._accel_widget_data_by_id = {}
+        
         if not hasattr(self, '_arrow_widget_actors'):
             self._arrow_widget_actors = []
         
@@ -1459,8 +1556,13 @@ class Plotter3D(BackgroundPlotter, BasePlotter):
             else:
                 print("Cell does not have enough points to calculate normal.")
                 return
-
-            arrow_start_point = np.asarray(picked_point)
+            
+            if self.snap_to_closest_node:
+                node_id = np.argmin(np.linalg.norm(points - picked_point, axis=1))
+                arrow_start_point = points[node_id]
+            else:
+                arrow_start_point = picked_point
+    
             self.disable_picking()
             
             arrow_length = self.default_excitation_size 
@@ -1473,23 +1575,33 @@ class Plotter3D(BackgroundPlotter, BasePlotter):
             self._arrow_checkbox_count += 1
             checkbox_position = (10, 50 + (self._arrow_checkbox_count - 1) * 55)
             first_callback_called = False
+            snap_mesh = mesh
 
             def line_callback(point1, point2):
                 nonlocal current_arrow_actor, first_callback_called
-
                 if not first_callback_called:
                     first_callback_called = True
                     return
+                start = np.asarray(point1)     
+                cell_id = snap_mesh.find_closest_cell(start)
+                if cell_id >= 0:
+                    cell = snap_mesh.extract_cells(cell_id)
+                    cell_points = cell.points
+                    if len(cell_points) > 0:
+                        node_id = np.argmin(np.linalg.norm(cell_points - start, axis=1))
+                        snapped_point = cell_points[node_id]
+                        current_line_widget.SetPoint1(snapped_point)
+                        start = snapped_point
 
+                end = np.asarray(point2)
+                direction = end - start
+                length = np.linalg.norm(direction)
+                
+                # Remove previous arrow
                 if current_arrow_actor is not None:
                     self.remove_actor(current_arrow_actor)
                     if current_arrow_actor in self._arrow_widget_actors:
                         self._arrow_widget_actors.remove(current_arrow_actor)
-                
-                start = np.asarray(point1)
-                end = np.asarray(point2)
-                direction = end - start
-                length = np.linalg.norm(direction)
                 
                 if length > 0:
                     direction_normalized = direction / length
@@ -1509,7 +1621,7 @@ class Plotter3D(BackgroundPlotter, BasePlotter):
                     direction=arrow_direction,
                     color='red',
                     scale=length,
-                    label=f"Interactive Arrow {self._arrow_checkbox_count}"
+                    label="Excitation"
                 )
                 self._arrow_widget_actors.append(current_arrow_actor)
 
@@ -1521,7 +1633,7 @@ class Plotter3D(BackgroundPlotter, BasePlotter):
             current_line_widget.SetHandleSize(0.005)
             current_line_widget.SetPoint1(arrow_start_point)
             current_line_widget.SetPoint2(initial_end)
-
+            
             def reverse_arrow_callback(value):
                 nonlocal is_reversed
                 is_reversed = value
@@ -1542,7 +1654,7 @@ class Plotter3D(BackgroundPlotter, BasePlotter):
                     "Reverse Arrow",
                     position="lower_left",
                     color='black',
-                    font_size=12
+                    font_size=12,
                 )
             first_callback_called = True
             line_callback(arrow_start_point, initial_end)
