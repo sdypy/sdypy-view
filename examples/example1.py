@@ -1,4 +1,4 @@
-import sdypy_dev as sd
+import sdypy as sd
 import meshio
 import numpy as np
 
