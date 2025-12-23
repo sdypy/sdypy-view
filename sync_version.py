@@ -4,7 +4,7 @@ import tomli
 import tomli_w
 import argparse
 
-package_name = "sdypy/EMA"
+package_name = "sdypy/view"
 
 def synchronize_version():
     print("Synchronizing version (pyproject.toml and __init__.py)...")
