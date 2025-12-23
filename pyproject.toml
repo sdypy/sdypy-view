@@ -1,16 +1,27 @@
 [build-system]
-requires = ["hatchling"]
+requires = [
+    "hatchling",
+]
 build-backend = "hatchling.build"
 
 [project]
 name = "sdypy-view"
-version = "0.1.1"
-authors = [{name = "Klemen Zaletelj, Janko Slavič et al.", email = "janko.slavic@fs.uni-lj.si"}]
-maintainers = [{name = "Klemen Zaletelj, Janko Slavič et al.", email = "klemen.zaletelj@fs.uni-lj.si"}]
+version = "0.1.5"
+authors = [
+    { name = "Klemen Zaletelj, Janko Slavič et al.", email = "janko.slavic@fs.uni-lj.si" },
+]
+maintainers = [
+    { name = "Klemen Zaletelj, Janko Slavič et al.", email = "klemen.zaletelj@fs.uni-lj.si" },
+]
 license = "MIT"
 description = "Visualization of SDyPy models and results"
 readme = "README.rst"
-keywords = ["Visualization", "2D", "3D", "FEM"]
+keywords = [
+    "Visualization",
+    "2D",
+    "3D",
+    "FEM",
+]
 requires-python = ">=3.10"
 dependencies = [
     "tqdm>=4.23.4",
@@ -24,15 +35,12 @@ dependencies = [
     "pyperclip",
 ]
 classifiers = [
-    'Development Status :: 5 - Production/Stable',
-    'Intended Audience :: Developers',
-    'Topic :: Scientific/Engineering',
-    'Programming Language :: Python :: 3.10',
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: Developers",
+    "Topic :: Scientific/Engineering",
+    "Programming Language :: Python :: 3.10",
     "License :: OSI Approved :: MIT License",
 ]
-
-[tool.hatch.build.targets.wheel]
-include = ["sdypy"]
 
 [project.optional-dependencies]
 dev = [
@@ -44,12 +52,16 @@ dev = [
     "sphinx-rtd-theme",
     "sphinx-copybutton>=0.5.2",
 ]
-
 qt = [
-  "pyqt5",
+    "pyqt5",
 ]
 
 [project.urls]
 homepage = "https://github.com/sdypy/sdypy-view"
 documentation = "https://github.com/sdypy/sdypy-view"
 source = "https://github.com/sdypy/sdypy-view"
+
+[tool.hatch.build.targets.wheel]
+include = [
+    "sdypy",
+]
