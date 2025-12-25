@@ -46,7 +46,7 @@ dev = [
 ]
 
 qt = [
-  "pyqt5",
+  "pyqt6",
 ]
 
 [project.urls]

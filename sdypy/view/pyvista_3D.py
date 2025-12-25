@@ -2,11 +2,13 @@ import pyvista as pv
 import numpy as np
 from pyvistaqt import BackgroundPlotter
 from pyvista import BasePlotter
+
 try:
-    from PyQt5.QtCore import QTimer
-    from PyQt5.QtWidgets import  QAction
+    from PyQt6.QtCore import QTimer
+    from PyQt6.QtGui import QAction
     haspyqt = True
-except:
+except ImportError as e:
+    print(e)
     haspyqt = False
 
 import pyperclip
@@ -209,7 +211,7 @@ class Plotter3D(BackgroundPlotter, BasePlotter):
     """A PyVista background plotter with some additional functionality."""
     def __init__(self, *args, **kwargs):
         if not haspyqt:
-            raise ImportError("Install PyQt5 in order to use this functionality.")
+            raise ImportError("Install PyQt6 in order to use this functionality.")
         
         self.recording_gif = False
         self.legend_required = False
@@ -434,7 +436,7 @@ class Plotter3D(BackgroundPlotter, BasePlotter):
         self.animation_started = True
         
         if self.blocking:
-            self.app.exec_()
+            self.app.exec()
 
     def pause_animation(self):
         """Pause the animation."""

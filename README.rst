@@ -4,6 +4,31 @@ SDyPy-view project
 The ``Plotter3D`` is a wrapper around the ``pyvista.BackgroundPlotter`` with some added functionality around
 convenient simplifications for use in structural dynamics.
 
+Notes
+-----
+
+**Running on Linux**
+
+If the viewer does not open, maybe ``libxcb-cursor0`` is missing. Try installing (Ubuntu):
+
+.. code-block:: shell
+
+   sudo apt install libxcb-cursor0
+
+Also, if running wayland, the following should be added at the top of the file:
+
+.. code-block:: python
+
+   os.environ['QT_QPA_PLATFORM'] = 'xcb'
+
+**Running from shell**
+
+If not running from jupyter notebook, the viewer might close right away. To keep it interactive, run it with:
+
+.. code-block:: shell
+
+   python -i file.py
+
 Basic usage
 -----------
 
