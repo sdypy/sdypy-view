@@ -53,7 +53,7 @@ dev = [
     "sphinx-copybutton>=0.5.2",
 ]
 qt = [
-    "pyqt5",
+  "pyqt6",
 ]
 
 [project.urls]
