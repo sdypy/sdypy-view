@@ -25,9 +25,9 @@ copyright = '2024, Klemen Zaletelj, Janko Slavič, Domen Gorjup'
 author = 'Klemen Zaletelj, Janko Slavič, Domen Gorjup'
 
 # The short X.Y version
-version = ''
+version = '0.1'
 # The full version, including alpha/beta/rc tags
-release = '0.1.0'
+release = '0.1.5'
 
 
 # -- General configuration ---------------------------------------------------
