@@ -6,7 +6,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "sdypy-view"
-version = "0.1.5"
+version = "0.1.6"
 authors = [
     { name = "Klemen Zaletelj, Janko Slavič et al.", email = "janko.slavic@fs.uni-lj.si" },
 ]
@@ -53,7 +53,7 @@ dev = [
     "sphinx-copybutton>=0.5.2",
 ]
 qt = [
-  "pyqt6",
+    "pyqt6",
 ]
 
 [project.urls]
